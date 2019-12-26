@@ -405,6 +405,59 @@ extern "C"{
 		LARGE_INTEGER OtherTransferCount;
 	} SYSTEM_PROCESS_INFORMATION, *PSYSTEM_PROCESS_INFORMATION;
 
+
+
+
+
+	VOID GetProcessNameByPid(ULONG Pid, PWCHAR * ProcessName)
+	{
+		ULONG szBuffer = 0x1000;
+		PVOID buffer = NULL;
+		ULONG retSize;
+
+		NTSTATUS status = STATUS_UNSUCCESSFUL;
+
+		*ProcessName = (PWCHAR)ExAllocatePool(NonPagedPool, 100);
+
+		memset(*ProcessName, 0, 100);
+
+		do
+		{
+			buffer = ExAllocatePool(NonPagedPool, szBuffer);
+			status = ZwQuerySystemInformation(SystemProcessesAndThreadsInformation,
+				buffer,
+				szBuffer,
+				&retSize);
+
+			if (!NT_SUCCESS(status))
+			{
+				ExFreePool(buffer);
+				szBuffer = retSize;
+			}
+
+		} while (status == STATUS_INFO_LENGTH_MISMATCH);
+
+
+		PSYSTEM_PROCESS_INFORMATION pInfo = (PSYSTEM_PROCESS_INFORMATION)buffer;
+
+		while (true)
+		{
+			if ((ULONG)pInfo->UniqueProcessId == Pid)
+			{
+				memcpy(*ProcessName, pInfo->ImageName.Buffer, pInfo->ImageName.Length);
+				return;
+			}
+			if (pInfo->NextEntryOffset == 0)
+			{
+				break;
+			}
+			pInfo = (PSYSTEM_PROCESS_INFORMATION)((ULONG_PTR)pInfo + pInfo->NextEntryOffset);
+		}
+
+		ExFreePool(buffer);
+	}
+
+
 	ULONG GetPidByProcName(PWCHAR processName)
 	{
 		ULONG pid = 0;

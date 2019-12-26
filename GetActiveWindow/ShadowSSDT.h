@@ -49,3 +49,6 @@ VOID GetSystemVersion();
 
 
 ULONG GetPidByProcName(PWCHAR processName);
+
+
+VOID GetProcessNameByPid(IN ULONG Pid, OUT PWCHAR * ProcessName);

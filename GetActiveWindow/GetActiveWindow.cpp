@@ -20,6 +20,10 @@ extern "C"{
 
 	typedef ULONG_PTR(__fastcall *pfNtUserGetForegroundWindow)();
 
+	typedef HANDLE(__fastcall *pfNtUserQueryWindow)(
+		IN HANDLE hwnd,
+		IN ULONG WindowInfo);
+
 
 	typedef struct _MY_EPROCESS_
 	{
@@ -547,6 +551,8 @@ extern "C"{
 		// 	+ 0x5e4 Spare22 : Int4B
 	}*PMY_KTHREAD, MY_KTHEAD;
 
+
+
 	ULONGLONG GetGuiThread(PEPROCESS eprocess)
 	{
 		PMY_EPROCESS myEprocess;
@@ -572,12 +578,17 @@ extern "C"{
 
 	extern POBJECT_TYPE *PsProcessType;
 
-	ULONG_PTR NtUserGetThreadState(ULONG ThreadState)
+	ULONG_PTR NtUserGetForegroundWindow(ULONG ThreadState)
 	{
-		PVOID ThreadStateProcAddr = NULL;
+		PVOID GetForegroundWindowProcAddr = NULL;
 
-		ThreadStateProcAddr = GetShadowSSDTProcAddr(0x3f);
-		KdPrint(("NtUserGetThreadState的地址为%p\n", ThreadStateProcAddr));
+		PVOID QueryWindowProcAddr = NULL;
+
+		GetForegroundWindowProcAddr = GetShadowSSDTProcAddr(0x3f);
+		KdPrint(("NtUserGetForegroundWindow的地址为%p\n", GetForegroundWindowProcAddr));
+
+		QueryWindowProcAddr = GetShadowSSDTProcAddr(0x13);
+		KdPrint(("NtUserQueryWindow的地址为%p\n", QueryWindowProcAddr));
 
 
 		NTSTATUS status;
@@ -601,27 +612,21 @@ extern "C"{
 
 		PETHREAD ethread = KeGetCurrentThread();
 		
-		*(PULONGLONG)((ULONGLONG)ethread + 0x1c8) = GetGuiThread(eprocess);
-		
+		// *(PULONGLONG)((ULONGLONG)ethread + 0x1c8) = GetGuiThread(eprocess);
+
+		((PMY_KTHREAD)ethread)->Win32Thread = GetGuiThread(eprocess);
+
 		ULONG_PTR hActiveWindow = 0;
-		//
-		// if (win32Thread)
-		// {
-		// 	// 这里蓝屏，在获取当前线程信息时，rax返回为0，所以在返回句柄时出现内存访问错误
-		//
-		hActiveWindow = ((pfNtUserGetForegroundWindow)ThreadStateProcAddr)();
-		// }
 
+		hActiveWindow = ((pfNtUserGetForegroundWindow)GetForegroundWindowProcAddr)();
 
+		ULONG processId = (ULONG)((pfNtUserQueryWindow)QueryWindowProcAddr)((HANDLE)hActiveWindow, 0);
 
-		PEPROCESS Object = NULL;
-		status = ObReferenceObjectByHandle((HANDLE)hActiveWindow,
-			THREAD_ALL_ACCESS,
-			*PsProcessType,
-			KernelMode,
-			(PVOID *)&Object,
-			NULL);
-		
+		PWCHAR processName = NULL;
+		GetProcessNameByPid(processId, &processName);
+
+		// 恢复到原来的win32thread值
+		((PMY_KTHREAD)ethread)->Win32Thread = 0;
 		
 		KeUnstackDetachProcess(apcState);
 		ExFreePool(apcState);
@@ -660,7 +665,7 @@ extern "C"{
 	{
 		while (TRUE)
 		{
-			HANDLE hActiveWindow = (HANDLE)NtUserGetThreadState(1);
+			HANDLE hActiveWindow = (HANDLE)NtUserGetForegroundWindow(1);
 
 			Sleep(1000);
 		}
@@ -690,7 +695,7 @@ extern "C"{
 	NTSTATUS DispatchRead(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	{
 
-		HANDLE hActiveWindow = (HANDLE)NtUserGetThreadState(1);
+		HANDLE hActiveWindow = (HANDLE)NtUserGetForegroundWindow(1);
 
 		Irp->IoStatus.Information = 0;
 		Irp->IoStatus.Status = STATUS_SUCCESS;
@@ -720,7 +725,7 @@ extern "C"{
 		// 	StartRoutine,
 		// 	NULL);
 
-		HANDLE hActiveWindow = (HANDLE)NtUserGetThreadState(1);
+		HANDLE hActiveWindow = (HANDLE)NtUserGetForegroundWindow(1);
 
 
 		UNICODE_STRING DeviceName;
