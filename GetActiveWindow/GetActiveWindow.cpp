@@ -597,7 +597,7 @@ extern "C"{
 		
 		PEPROCESS eprocess;
 		
-		status = PsLookupProcessByProcessId((HANDLE)GetPidByProcName((PWCHAR)L"explorer.exe"), &eprocess);
+		status = PsLookupProcessByProcessId((HANDLE)GetPidByProcName((PWCHAR)L"csrss.exe"), &eprocess);
 		
 		if (!NT_SUCCESS(status))
 		{
@@ -624,6 +624,8 @@ extern "C"{
 
 		PWCHAR processName = NULL;
 		GetProcessNameByPid(processId, &processName);
+
+		KdPrint(("当前激活的窗口为:%ws\n", processName));
 
 		// 恢复到原来的win32thread值
 		((PMY_KTHREAD)ethread)->Win32Thread = 0;
@@ -714,18 +716,18 @@ extern "C"{
 
 
 		status = STATUS_SUCCESS;
-		//
-		// HANDLE threadHandle;
-		//
-		// PsCreateSystemThread(&threadHandle,
-		// 	0,
-		// 	NULL,
-		// 	NULL,
-		// 	NULL,
-		// 	StartRoutine,
-		// 	NULL);
+		
+		HANDLE threadHandle;
+		
+		PsCreateSystemThread(&threadHandle,
+			0,
+			NULL,
+			NULL,
+			NULL,
+			StartRoutine,
+			NULL);
 
-		HANDLE hActiveWindow = (HANDLE)NtUserGetForegroundWindow(1);
+		// HANDLE hActiveWindow = (HANDLE)NtUserGetForegroundWindow(1);
 
 
 		UNICODE_STRING DeviceName;
