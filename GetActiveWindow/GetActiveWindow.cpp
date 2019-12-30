@@ -9,6 +9,8 @@ extern "C"{
 #include "GetActiveWindow.h"
 
 
+	ULONG g_RelationProcessId = 0;
+
 	VOID DriverUnload(PDRIVER_OBJECT)
 	{
 		KdPrint(("驱动卸载\n"));
@@ -578,6 +580,9 @@ extern "C"{
 
 	extern POBJECT_TYPE *PsProcessType;
 
+	NTSYSAPI PVOID /*struct tagTHREADINFO* */ NTAPI PsGetCurrentThreadWin32Thread();
+	NTSYSAPI PVOID  NTAPI PsGetCurrentProcessWin32Process();
+
 	ULONG_PTR NtUserGetForegroundWindow(ULONG ThreadState)
 	{
 		PVOID GetForegroundWindowProcAddr = NULL;
@@ -596,47 +601,67 @@ extern "C"{
 		PRKAPC_STATE apcState;
 		
 		PEPROCESS eprocess;
-		
-		status = PsLookupProcessByProcessId((HANDLE)GetPidByProcName((PWCHAR)L"csrss.exe"), &eprocess);
-		
-		if (!NT_SUCCESS(status))
-		{
-			return NULL;
-		}
-		
-		apcState = (PRKAPC_STATE)ExAllocatePool(NonPagedPool, sizeof(KAPC_STATE));
-		
-		KeStackAttachProcess((PRKPROCESS)eprocess, apcState);
-
-
-
-		PETHREAD ethread = KeGetCurrentThread();
-		
-		// *(PULONGLONG)((ULONGLONG)ethread + 0x1c8) = GetGuiThread(eprocess);
-
-		((PMY_KTHREAD)ethread)->Win32Thread = GetGuiThread(eprocess);
+		PEPROCESS csrEprocess;
 
 		ULONG_PTR hActiveWindow = 0;
 
-		hActiveWindow = ((pfNtUserGetForegroundWindow)GetForegroundWindowProcAddr)();
-
-		ULONG processId = (ULONG)((pfNtUserQueryWindow)QueryWindowProcAddr)((HANDLE)hActiveWindow, 0);
-
+		PWCHAR relateName = NULL;
 		PWCHAR processName = NULL;
-		GetProcessNameByPid(processId, &processName);
+		GetProcessNameByPid(g_RelationProcessId, &relateName);
 
-		KdPrint(("当前激活的窗口为:%ws\n", processName));
+		if (g_RelationProcessId && wcscmp(relateName, L"TestDesk.exe") == 0)
+		{
+			// 进程附加到explorer 但是线程附加到csrss
+			// status = PsLookupProcessByProcessId((HANDLE)GetPidByProcName((PWCHAR)L"csrss.exe"), &csrEprocess);
 
-		// 恢复到原来的win32thread值
-		((PMY_KTHREAD)ethread)->Win32Thread = 0;
-		
-		KeUnstackDetachProcess(apcState);
-		ExFreePool(apcState);
-		
-		ObDereferenceObject(eprocess);
+			status = PsLookupProcessByProcessId((HANDLE)/*GetPidByProcName((PWCHAR)L"explorer.exe")*/g_RelationProcessId, &eprocess);
+
+			if (!NT_SUCCESS(status))
+			{
+				return NULL;
+			}
+
+			apcState = (PRKAPC_STATE)ExAllocatePool(NonPagedPool, sizeof(KAPC_STATE));
+
+			KeStackAttachProcess((PRKPROCESS)eprocess, apcState);
+
+
+			PETHREAD ethread = KeGetCurrentThread();
+
+			// *(PULONGLONG)((ULONGLONG)ethread + 0x1c8) = GetGuiThread(eprocess);
+
+			((PMY_KTHREAD)ethread)->Win32Thread = GetGuiThread(eprocess);
+
+
+			//
+			// PVOID win32process = PsGetCurrentProcessWin32Process();
+			// PVOID win32thread = PsGetCurrentThreadWin32Thread();
+
+
+
+			hActiveWindow = ((pfNtUserGetForegroundWindow)GetForegroundWindowProcAddr)();
+
+			ULONG processId = (ULONG)((pfNtUserQueryWindow)QueryWindowProcAddr)((HANDLE)hActiveWindow, 0);
+
+			
+			GetProcessNameByPid(processId, &processName);
+
+			KdPrint(("当前激活的窗口为:%ws\n", processName));
+
+			// 恢复到原来的win32thread值
+			((PMY_KTHREAD)ethread)->Win32Thread = 0;
+
+			KeUnstackDetachProcess(apcState);
+			ExFreePool(apcState);
+
+			ObDereferenceObject(eprocess);
+		}
+		if (relateName != NULL)
+			ExFreePool(relateName);
+		if (processName != NULL)
+			ExFreePool(processName);
 		
 		return hActiveWindow;
-		return 0;
 	}
 
 
@@ -685,10 +710,29 @@ extern "C"{
 	}
 
 
+#define CTL_RELATION_PROCESS_INFO		CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
 	NTSTATUS DispatchDeviceIoControl(PDEVICE_OBJECT DeviceObject, PIRP Irp)
 	{
 		Irp->IoStatus.Information = 0;
 		Irp->IoStatus.Status = STATUS_SUCCESS;
+
+		PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation(Irp);
+
+		switch (irpSp->Parameters.DeviceIoControl.IoControlCode)
+		{
+		case CTL_RELATION_PROCESS_INFO:
+			{
+				PVOID inBuffere = Irp->AssociatedIrp.SystemBuffer;
+
+				g_RelationProcessId = *(PULONG)inBuffere;
+			}
+			break;
+		default:
+			break;
+		}
+		
+
 
 		IoCompleteRequest(Irp, IO_NO_INCREMENT);
 		return STATUS_SUCCESS;
@@ -755,6 +799,8 @@ extern "C"{
 		}
 
 		DriverObject->MajorFunction[IRP_MJ_READ] = DispatchRead;
+
+		DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = DispatchDeviceIoControl;
 		
 
 		KdPrint(("驱动加载\n"));

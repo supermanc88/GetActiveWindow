@@ -445,6 +445,7 @@ extern "C"{
 			if ((ULONG)pInfo->UniqueProcessId == Pid)
 			{
 				memcpy(*ProcessName, pInfo->ImageName.Buffer, pInfo->ImageName.Length);
+				ExFreePool(buffer);
 				return;
 			}
 			if (pInfo->NextEntryOffset == 0)
@@ -495,9 +496,11 @@ extern "C"{
 		{
 			if (pInfo->ImageName.Buffer != NULL)
 			{
-				if (RtlCompareUnicodeString(&uProcessName, &pInfo->ImageName, TRUE) == 0)
+				if (RtlCompareUnicodeString(&uProcessName, &pInfo->ImageName, TRUE) == 0 && pInfo->SessionId != 0)
 				{
-					return (ULONG)pInfo->UniqueProcessId;
+					ULONG pid = (ULONG)pInfo->UniqueProcessId;
+					ExFreePool(buffer);
+					return pid;
 				}
 			}
 			if (pInfo->NextEntryOffset == 0)
